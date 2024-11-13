@@ -1,7 +1,9 @@
 require('dotenv').config()
 
 const express = require('express')
+const axios = require('axios')
 const { createClient } = require('@supabase/supabase-js')
+
 const app = express()
 const PORT = process.env.PORT || 8080
 
@@ -51,6 +53,35 @@ app.post('/user-registration', async (req, res) => {
     }
 })
 
+// Shopify API configuration
+const shopifyConfig = {
+    storeUrl: process.env.STORE_URL,
+    accessToken: process.env.ACCESS_TOKEN,
+}
+
+app.use(express.json())
+
+// Function to fetch product metadata from Shopify
+async function fetchProductMetadata(productId) {
+    try {
+        const response = await axios.get(
+            `${shopifyConfig.storeUrl}/admin/api/2023-10/products/${productId}.json`,
+            {
+                headers: {
+                    'X-Shopify-Access-Token': shopifyConfig.accessToken,
+                },
+            }
+        )
+        return response.data.product // Returns product details, including metadata
+    } catch (error) {
+        console.error(
+            `Error fetching metadata for product ID ${productId}:`,
+            error.message
+        )
+        return null
+    }
+}
+
 app.post('/shopify-order-webhook', async (req, res) => {
     const orderData = req.body
 
@@ -62,17 +93,36 @@ app.post('/shopify-order-webhook', async (req, res) => {
     const totalAmount = orderData.current_total_price
     const currency = orderData.currency
 
-    // Extract line items (SKU, product name, quantity, and price)
-    const lineItems = orderData.line_items.map((item) => ({
-        productName: item.name,
-        sku: parseInt(item.sku), // Convert SKU to an integer
-        quantity: parseInt(item.quantity),
-        price: parseFloat(item.price),
-        fulfillmentStatus: item.fulfillment_status,
-    }))
+    // Array to store line items with metadata
+    const lineItemsWithMetadata = []
+
+    // Process line items, fetching metadata for each product
+    for (const item of orderData.line_items) {
+        const productId = item.product_id
+
+        // Fetch product metadata
+        const productData = await fetchProductMetadata(productId)
+        const metadata = productData ? productData.metafields : null
+        console.log(productData)
+        // Log metadata for debugging
+        console.log(
+            `Metadata for product ${item.name} (ID: ${productId}):`,
+            metadata
+        )
+
+        // Add the line item to the array with additional metadata
+        lineItemsWithMetadata.push({
+            productName: item.name,
+            sku: parseInt(item.sku),
+            quantity: parseInt(item.quantity),
+            price: parseFloat(item.price),
+            fulfillmentStatus: item.fulfillment_status,
+            // metadata: metadata,
+        })
+    }
 
     try {
-        // Step 1: Insert order into the orders table (logging each incoming order as before)
+        // Step 1: Insert order into the orders table
         const { data: orderLogData, error: orderLogError } = await supabase
             .from('orders')
             .insert([
@@ -83,7 +133,7 @@ app.post('/shopify-order-webhook', async (req, res) => {
                     purchase_date: purchaseDate,
                     total_amount: totalAmount,
                     currency: currency,
-                    line_items: lineItems, // Save line items as JSONB
+                    line_items: lineItemsWithMetadata, // Save line items with metadata as JSONB
                 },
             ])
 
@@ -98,7 +148,7 @@ app.post('/shopify-order-webhook', async (req, res) => {
         console.log('Order logged in orders table:', orderLogData)
 
         // Step 2: Accumulate sku_quantity in the user_sku_quantities table
-        for (const item of lineItems) {
+        for (const item of lineItemsWithMetadata) {
             const skuQuantity = item.sku // Use the numeric SKU quantity
 
             // Check if there is already a record for this user
@@ -109,7 +159,6 @@ app.post('/shopify-order-webhook', async (req, res) => {
                 .single()
 
             if (existingError && existingError.code !== 'PGRST116') {
-                // Ignore "not found" errors
                 console.error(
                     'Error checking for existing record:',
                     existingError.message
@@ -118,7 +167,7 @@ app.post('/shopify-order-webhook', async (req, res) => {
             }
 
             if (existingData) {
-                // If the record exists, update it by adding the new SKU quantity
+                // Update existing record by adding new SKU quantity
                 const newSkuQuantity = existingData.sku_quantity + skuQuantity
                 await supabase
                     .from('user_sku_quantities')
@@ -128,7 +177,7 @@ app.post('/shopify-order-webhook', async (req, res) => {
                     })
                     .eq('user_id', customerId)
             } else {
-                // If the record does not exist, create a new record
+                // Create a new record
                 await supabase.from('user_sku_quantities').insert({
                     user_id: customerId,
                     sku_quantity: skuQuantity,
