@@ -31,17 +31,9 @@ app.post('/user-registration', async (req, res) => {
                 email: customerData.email,
                 created_at: customerData.created_at,
                 updated_at: customerData.updated_at,
-                first_name: customerData.first_name,
-                last_name: customerData.last_name,
                 orders_count: customerData.orders_count,
-                state: customerData.state,
                 total_spent: customerData.total_spent,
-                last_order_id: customerData.last_order_id,
-                note: customerData.note,
                 verified_email: customerData.verified_email,
-                multipass_identifier: customerData.multipass_identifier,
-                tags: customerData.tags,
-                last_order_name: customerData.last_order_name,
                 currency: customerData.currency,
                 phone: customerData.phone,
             },
@@ -49,7 +41,7 @@ app.post('/user-registration', async (req, res) => {
 
         if (error) throw error
 
-        res.status(200).send('Webhook received and processed')
+        res.status(200).send('Webhook received and   processed')
     } catch (error) {
         console.error('Error processing webhook:', error.message)
         res.status(500).send('Webhook Error')
