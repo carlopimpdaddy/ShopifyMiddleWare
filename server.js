@@ -256,6 +256,7 @@ app.post('/count', async (req, res) => {
                             `Decremented sku_quantity for record ID ${record.id} to ${newSkuQuantity}`
                         )
                     }
+                    vc
                 } else {
                     console.log(
                         `Record ID ${record.id} has sku_quantity 0, no decrement applied`
