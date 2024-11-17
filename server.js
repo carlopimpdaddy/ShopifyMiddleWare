@@ -22,7 +22,6 @@ app.post('/user-registration', async (req, res) => {
 
     try {
         const customerData = req.body
-        const customerId = customerData.id
         console.log('New user registration with ID:', customerData)
 
         const { error } = await supabase.from('users').insert([
