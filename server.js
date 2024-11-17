@@ -111,7 +111,6 @@ app.post('/shopify-order-webhook', async (req, res) => {
             quantity: parseInt(item.quantity),
             price: parseFloat(item.price),
             fulfillmentStatus: item.fulfillment_status,
-            // metadata: metadata,
         })
     }
 
@@ -141,42 +140,64 @@ app.post('/shopify-order-webhook', async (req, res) => {
 
         console.log('Order logged in orders table:', orderLogData)
 
-        // Step 2: Accumulate sku_quantity in the user_sku_quantities table
         for (const item of lineItemsWithMetadata) {
             const skuQuantity = item.sku // Use the numeric SKU quantity
+            console.log('Processing line item:', item)
 
-            // Check if there is already a record for this user
-            const { data: existingData, error: existingError } = await supabase
-                .from('user_sku_quantities')
-                .select('*')
-                .eq('user_id', customerId)
-                .single()
+            try {
+                // Check if a record exists for this user
+                const { data: existingData, error: existingError } =
+                    await supabase
+                        .from('user_sku_quantities')
+                        .select('*')
+                        .eq('user_id', customerId)
+                        .single()
 
-            if (existingError && existingError.code !== 'PGRST116') {
-                console.error(
-                    'Error checking for existing record:',
-                    existingError.message
-                )
-                throw new Error('Database query error')
-            }
+                if (existingError && existingError.code !== 'PGRST116') {
+                    console.error(
+                        'Error checking for existing record:',
+                        existingError.message
+                    )
+                    throw new Error('Database query error')
+                }
 
-            if (existingData) {
-                // Update existing record by adding new SKU quantity
-                const newSkuQuantity = existingData.sku_quantity + skuQuantity
-                await supabase
-                    .from('user_sku_quantities')
-                    .update({
-                        sku_quantity: newSkuQuantity,
+                if (existingData) {
+                    // Update existing record
+                    const newSkuQuantity =
+                        existingData.sku_quantity + skuQuantity
+                    const { error } = await supabase
+                        .from('user_sku_quantities')
+                        .update({
+                            sku_quantity: newSkuQuantity,
+                            last_purchase_date: purchaseDate,
+                        })
+                        .eq('user_id', customerId)
+
+                    if (error) throw error
+
+                    console.log(
+                        'Updated user_sku_quantities for user_id:',
+                        customerId
+                    )
+                } else {
+                    // Insert new record
+                    const { error } = await supabase
+                        .from('user_sku_quantities')
+                        .insert({
+                            user_id: customerId,
+                            sku_quantity: skuQuantity,
+                            last_purchase_date: purchaseDate,
+                        })
+                    if (error) throw error
+
+                    console.log('Inserted into user_sku_quantities:', {
+                        user_id: customerId,
+                        sku_quantity: skuQuantity,
                         last_purchase_date: purchaseDate,
                     })
-                    .eq('user_id', customerId)
-            } else {
-                // Create a new record
-                await supabase.from('user_sku_quantities').insert({
-                    user_id: customerId,
-                    sku_quantity: skuQuantity,
-                    last_purchase_date: purchaseDate,
-                })
+                }
+            } catch (error) {
+                console.error('Error in step 2:', error.message)
             }
         }
 
@@ -189,29 +210,32 @@ app.post('/shopify-order-webhook', async (req, res) => {
 })
 
 app.post('/count', async (req, res) => {
-    const { requestCount, userId } = req.body // Extract the counter and bot ID from the request body
+    const { requestCount, userId, botId } = req.body // Extract the counter, userId, and botId from the request body
+    console.log(requestCount, userId, botId)
 
-    if (requestCount === undefined) {
-        // If requestCount is missing, respond with an error
-        return res.status(400).json({ error: 'Missing request count' })
+    if (!requestCount || !userId || !botId) {
+        // If any required data is missing, respond with an error
+        return res
+            .status(400)
+            .json({ error: 'Missing request count, user ID, or bot ID' })
     }
 
     try {
         console.log(`Received request count: ${requestCount}`)
-        console.log(`Bot ID: ${userId}`)
+        console.log(`User ID: ${userId}, Bot ID: ${botId}`)
 
-        // Find all records in `user_sku_quantities` with the specified bot_id
+        // Find records in `user_sku_quantities` matching both user_id and bot_id
         const { data, error } = await supabase
             .from('user_sku_quantities')
             .select('*')
-            .eq('bot_id', userId)
+            .eq('user_id', userId)
+            .eq('bot_id', botId)
 
         if (error) {
             console.error('Error fetching records:', error.message)
             return res.status(500).json({ error: 'Error fetching records' })
         }
 
-        // Check if there are any records for the given bot_id
         if (data && data.length > 0) {
             // Loop through each record and decrement sku_quantity only if it's greater than 0
             const updates = data.map(async (record) => {
@@ -248,8 +272,12 @@ app.post('/count', async (req, res) => {
                 requestCount,
             })
         } else {
-            console.log(`No records found for bot ID: ${botId}`)
-            res.status(404).json({ error: 'No records found for this bot ID' })
+            console.log(
+                `No records found for user ID: ${userId} and bot ID: ${botId}`
+            )
+            res.status(404).json({
+                error: 'No records found for this user ID and bot ID',
+            })
         }
     } catch (error) {
         console.error('Error processing request:', error.message)
