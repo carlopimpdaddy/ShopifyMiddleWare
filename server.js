@@ -210,26 +210,25 @@ app.post('/shopify-order-webhook', async (req, res) => {
 })
 
 app.post('/count', async (req, res) => {
-    const { requestCount, userId, botId } = req.body // Extract the counter, userId, and botId from the request body
-    console.log(requestCount, userId, botId)
+    const { requestCount, userId } = req.body // Extract the counter and userId from the request body
+    console.log('Request Body:', req.body.customerData)
 
-    if (!requestCount || !userId || !botId) {
-        // If any required data is missing, respond with an error
+    if (!requestCount || !userId) {
+        // If required data is missing, respond with an error
         return res
             .status(400)
-            .json({ error: 'Missing request count, user ID, or bot ID' })
+            .json({ error: 'Missing request count or user ID' })
     }
 
     try {
         console.log(`Received request count: ${requestCount}`)
-        console.log(`User ID: ${userId}, Bot ID: ${botId}`)
+        console.log(`User ID: ${userId}`)
 
-        // Find records in `user_sku_quantities` matching both user_id and bot_id
+        // Find records in `user_sku_quantities` matching the user_id
         const { data, error } = await supabase
             .from('user_sku_quantities')
             .select('*')
-            .eq('user_id', userId)
-            .eq('bot_id', botId)
+            .eq('bot_id', userId) // Cast user_id to TEXT
 
         if (error) {
             console.error('Error fetching records:', error.message)
@@ -256,7 +255,6 @@ app.post('/count', async (req, res) => {
                             `Decremented sku_quantity for record ID ${record.id} to ${newSkuQuantity}`
                         )
                     }
-                    vc
                 } else {
                     console.log(
                         `Record ID ${record.id} has sku_quantity 0, no decrement applied`
@@ -273,11 +271,9 @@ app.post('/count', async (req, res) => {
                 requestCount,
             })
         } else {
-            console.log(
-                `No records found for user ID: ${userId} and bot ID: ${botId}`
-            )
+            console.log(`No records found for user ID: ${userId}`)
             res.status(404).json({
-                error: 'No records found for this user ID and bot ID',
+                error: 'No records found for this user ID',
             })
         }
     } catch (error) {
